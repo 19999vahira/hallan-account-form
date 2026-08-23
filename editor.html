@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Form Editor — Hallan Cash &amp; Carry</title>
+<style>
+:root{--gold:#c8a84b;--black:#152d4d;--border:#d8d8d8;--bg:#f0f0f0;--surface:#fff;--red:#c00;--r:5px;}
+*{box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--bg);margin:0;color:#222}
+.hdr{background:var(--black);color:var(--gold);padding:16px 20px;font-weight:700;font-size:1.1rem}
+.wrap{max-width:900px;margin:24px auto 80px;padding:0 14px}
+#loginBox{max-width:360px;margin:80px auto;background:#fff;padding:24px;border-radius:var(--r);box-shadow:0 1px 5px rgba(0,0,0,.1)}
+#loginBox input{width:100%;padding:10px;margin:10px 0;border:1px solid var(--border);border-radius:var(--r)}
+#loginBox button{width:100%;padding:10px;background:var(--gold);border:none;border-radius:var(--r);font-weight:700;cursor:pointer}
+#loginErr{color:var(--red);font-size:.85rem}
+.section{background:#fff;border-radius:var(--r);box-shadow:0 1px 5px rgba(0,0,0,.08);margin-bottom:18px;overflow:hidden}
+.section-hd{background:var(--black);color:var(--gold);padding:10px 16px;font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.section-hd input{background:transparent;border:none;color:var(--gold);font-weight:700;font-size:1rem;width:60%}
+.section-bd{padding:10px 16px}
+.field-row{border:1px solid var(--border);border-radius:var(--r);padding:12px;margin-bottom:10px;background:#fafafa}
+.field-row .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+.field-row input[type=text],.field-row select{padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);font-size:.85rem}
+.field-row label{font-size:.78rem;color:#555;display:flex;align-items:center;gap:4px}
+.field-row textarea{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);font-size:.85rem;min-height:50px}
+.btn{padding:6px 12px;border:none;border-radius:var(--r);cursor:pointer;font-size:.8rem;font-weight:600}
+.btn-danger{background:#fde8e8;color:var(--red)}
+.btn-move{background:#eee}
+.btn-add{background:var(--gold);color:var(--black)}
+.btn-save{background:var(--black);color:var(--gold);padding:12px 30px;font-size:.95rem}
+.opts-note{font-size:.75rem;color:#888;margin-top:4px}
+#topBar{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+#saveStatus{font-size:.85rem}
+#addSectionRow{margin:20px 0;text-align:center}
+#addSectionRow input{padding:8px;border:1px solid var(--border);border-radius:var(--r);margin-right:8px}
+</style>
+</head>
+<body>
+<div class="hdr">Form Editor — Hallan Cash &amp; Carry</div>
+
+<div id="loginBox">
+  <h3>Enter editor password</h3>
+  <input type="password" id="pwInput" placeholder="Password">
+  <button onclick="login()">Open Editor</button>
+  <div id="loginErr"></div>
+</div>
+
+<div class="wrap" id="editorWrap" style="display:none">
+  <div id="topBar">
+    <button class="btn btn-save" onclick="saveAll()">💾 Save Changes</button>
+    <span id="saveStatus"></span>
+  </div>
+  <div id="sectionsContainer"></div>
+  <div id="addSectionRow">
+    <input type="text" id="newSectionName" placeholder="New section name">
+    <button class="btn btn-add" onclick="addSection()">+ Add Section</button>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+var APPS_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_EXEC_URL_HERE';
+// ─────────────────────────────────────────────
+
+var PASSWORD = '';
+var FIELDS = []; // working copy: {id (may be blank for new), section, order, type, label, required, options[], allowOther}
+
+function login() {
+  PASSWORD = document.getElementById('pwInput').value;
+  fetch(APPS_SCRIPT_URL + '?action=getAdminConfig&password=' + encodeURIComponent(PASSWORD))
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if (!res.success) { document.getElementById('loginErr').textContent = res.message; return; }
+      FIELDS = res.fields.filter(function(f){ return f.active; }).map(function(f){
+        return { id:f.id, section:f.section, order:f.order, type:f.type, label:f.label, required:f.required, options:f.options||[], allowOther:f.allowOther };
+      }).sort(function(a,b){ return a.order-b.order; });
+      document.getElementById('loginBox').style.display = 'none';
+      document.getElementById('editorWrap').style.display = '';
+      render();
+    })
+    .catch(function(err){ document.getElementById('loginErr').textContent = 'Error: ' + err.message; });
+}
+
+function groupBySection() {
+  var sections = {}; var order = [];
+  FIELDS.forEach(function(f){
+    if (!sections[f.section]) { sections[f.section] = []; order.push(f.section); }
+    sections[f.section].push(f);
+  });
+  return { sections: sections, order: order };
+}
+
+function render() {
+  var g = groupBySection();
+  var html = '';
+  g.order.forEach(function(secName){
+    html += '<div class="section" data-section="'+esc(secName)+'">';
+    html += '<div class="section-hd"><span>'+esc(secName)+'</span>'+
+            '<button class="btn btn-add" onclick="addField(\''+escJs(secName)+'\')">+ Add Field</button></div>';
+    html += '<div class="section-bd">';
+    g.sections[secName].forEach(function(f, i){
+      html += fieldRowHtml(f, FIELDS.indexOf(f));
+    });
+    html += '</div></div>';
+  });
+  document.getElementById('sectionsContainer').innerHTML = html;
+}
+
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function escJs(s){ return String(s==null?'':s).replace(/'/g,"\\'"); }
+
+var TYPES = ['text','email','tel','date','textarea','dropdown','checkbox-group','radio-group','file'];
+
+function fieldRowHtml(f, idx) {
+  var needsOptions = (f.type === 'dropdown' || f.type === 'checkbox-group' || f.type === 'radio-group');
+  var typeOpts = TYPES.map(function(t){ return '<option value="'+t+'"'+(t===f.type?' selected':'')+'>'+t+'</option>'; }).join('');
+  return '<div class="field-row" data-idx="'+idx+'">'+
+    '<div class="top">'+
+      '<input type="text" value="'+esc(f.label)+'" oninput="updateField('+idx+',\'label\',this.value)" placeholder="Field label" style="flex:1;min-width:180px">'+
+      '<select onchange="updateField('+idx+',\'type\',this.value)">'+typeOpts+'</select>'+
+      '<label><input type="checkbox" '+(f.required?'checked':'')+' onchange="updateField('+idx+',\'required\',this.checked)"> Required</label>'+
+      '<button class="btn btn-move" onclick="moveField('+idx+',-1)">↑</button>'+
+      '<button class="btn btn-move" onclick="moveField('+idx+',1)">↓</button>'+
+      '<button class="btn btn-danger" onclick="deleteField('+idx+')">Delete</button>'+
+    '</div>'+
+    (needsOptions ?
+      '<textarea placeholder="One option per line" oninput="updateOptions('+idx+',this.value)">'+esc((f.options||[]).join('\n'))+'</textarea>'+
+      '<div class="opts-note">One option per line. These become the dropdown/checkbox/radio choices.</div>'
+      : '') +
+    '</div>';
+}
+
+function updateField(idx, key, val) { FIELDS[idx][key] = val; if (key==='type') render(); }
+function updateOptions(idx, text) { FIELDS[idx].options = text.split('\n').map(function(s){ return s.trim(); }).filter(Boolean); }
+
+function moveField(idx, dir) {
+  var f = FIELDS[idx];
+  var sameSec = FIELDS.map(function(x,i){ return {x:x,i:i}; }).filter(function(o){ return o.x.section === f.section; });
+  var pos = sameSec.findIndex(function(o){ return o.i === idx; });
+  var swapWith = pos + dir;
+  if (swapWith < 0 || swapWith >= sameSec.length) return;
+  var otherIdx = sameSec[swapWith].i;
+  var tmp = FIELDS[idx]; FIELDS[idx] = FIELDS[otherIdx]; FIELDS[otherIdx] = tmp;
+  renumber();
+  render();
+}
+
+function deleteField(idx) {
+  if (!confirm('Delete "' + FIELDS[idx].label + '"? Existing collected data for this field stays safe in the sheet, it just stops appearing on the form.')) return;
+  FIELDS.splice(idx, 1);
+  renumber();
+  render();
+}
+
+function addField(section) {
+  FIELDS.push({ id:null, section:section, order:FIELDS.length+1, type:'text', label:'New Field', required:false, options:[], allowOther:false });
+  renumber();
+  render();
+}
+
+function addSection() {
+  var name = document.getElementById('newSectionName').value.trim();
+  if (!name) return;
+  FIELDS.push({ id:null, section:name, order:FIELDS.length+1, type:'text', label:'New Field', required:false, options:[], allowOther:false });
+  document.getElementById('newSectionName').value = '';
+  renumber();
+  render();
+}
+
+function renumber() { FIELDS.forEach(function(f,i){ f.order = i+1; }); }
+
+function saveAll() {
+  document.getElementById('saveStatus').textContent = 'Saving…';
+  fetch(APPS_SCRIPT_URL, { method:'POST', body: JSON.stringify({ action:'saveConfig', password:PASSWORD, fields:FIELDS }) })
+    .then(function(r){ return r.json(); })
+    .then(function(res){
+      if (res.success) {
+        document.getElementById('saveStatus').textContent = '✓ Saved ' + new Date().toLocaleTimeString();
+        FIELDS = res.fields.map(function(f){ return { id:f.id, section:f.section, order:f.order, type:f.type, label:f.label, required:f.required, options:f.options||[], allowOther:f.allowOther }; });
+        render();
+      } else {
+        document.getElementById('saveStatus').textContent = '✗ ' + res.message;
+      }
+    })
+    .catch(function(err){ document.getElementById('saveStatus').textContent = '✗ Error: ' + err.message; });
+}
+</script>
+</body>
+</html>
